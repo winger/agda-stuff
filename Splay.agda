@@ -12,7 +12,7 @@ open import Data.Empty
 open import Data.Unit
 open import Data.Product
 open import Data.List as L using (List; []; _∷_; _++_)
-open import Data.Nat
+open import Data.Nat hiding (compare)
 open IsStrictTotalOrder isStrictTotalOrder
 
 infix 10 ¬_
@@ -139,3 +139,18 @@ toList-sorted {l « x » r} (node ttt prf₁ prf₂) =
     (toList-sorted (lemma-sorted prf₁)) (lemma-toList-range prf₁)
     (toList-sorted (lemma-sorted prf₂)) (lemma-toList-range prf₂)
 
+splay : Tree → Key → Tree
+splay □ _ = □
+splay (a « x » b) k with compare k x
+... | (tri≈ _ _ _) = a « x » b
+splay (□ « x » a) k | (tri< _ _ _) = □ « x » a
+splay ((a « y » b) « x » c) k | (tri< _ _ _) with compare k y 
+... | (tri≈ _ _ _) = a « y » (b « x » c)
+... | (tri> _ _ _) = {!!}
+splay (((a « z » b) « y » c) « x » d) | (tri< _ _ _) | (tri< _ _ _) = {!!}
+splay ((□ « y » c) « x » d) | (tri< _ _ _) | (tri< _ _ _) = {!!}
+splay (a « x » □) k | (tri> _ _ _) = a « x » □
+splay (a « x » (b « y » c)) k | (tri> _ _ _) with compare k y 
+... | (tri≈ _ _ _) = (a « x » b) « y » c
+... | (tri< _ _ _) = {!!}
+... | (tri> _ _ _) = {!!}
