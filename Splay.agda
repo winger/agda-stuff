@@ -139,18 +139,70 @@ toList-sorted {l « x » r} (node ttt prf₁ prf₂) =
     (toList-sorted (lemma-sorted prf₁)) (lemma-toList-range prf₁)
     (toList-sorted (lemma-sorted prf₂)) (lemma-toList-range prf₂)
 
-splay : Tree → Key → Tree
-splay □ _ = □
-splay (a « x » b) k with compare k x
-... | (tri≈ _ _ _) = a « x » b
-splay (□ « x » a) k | (tri< _ _ _) = □ « x » a
-splay ((a « y » b) « x » c) k | (tri< _ _ _) with compare k y 
-... | (tri≈ _ _ _) = a « y » (b « x » c)
-... | (tri> _ _ _) = {!!}
-splay (((a « z » b) « y » c) « x » d) | (tri< _ _ _) | (tri< _ _ _) = {!!}
-splay ((□ « y » c) « x » d) | (tri< _ _ _) | (tri< _ _ _) = {!!}
-splay (a « x » □) k | (tri> _ _ _) = a « x » □
-splay (a « x » (b « y » c)) k | (tri> _ _ _) with compare k y 
-... | (tri≈ _ _ _) = (a « x » b) « y » c
-... | (tri< _ _ _) = {!!}
-... | (tri> _ _ _) = {!!}
+data Tree' : Set where
+  ?«_»_ : Key → Tree → Tree'
+  _«_»? : Tree → Key → Tree'
+
+TreeZipper : Set
+TreeZipper = List Tree'
+
+lookup-zip-tr : Key → Tree → TreeZipper → Tree × TreeZipper
+lookup-zip-tr _ □ zip = (□ , zip)
+lookup-zip-tr y (l « x » r) zip with compare y x
+... | (tri< _ _ _) = lookup-zip-tr y l (?« x » r ∷ zip)
+... | (tri≈ _ _ _) = l « x » r , zip
+... | (tri> _ _ _) = lookup-zip-tr y r (l « x »? ∷ zip)
+
+lookup-zip : Key → Tree → Tree × TreeZipper
+lookup-zip x t = lookup-zip-tr x t []
+
+data SortedRangeZipper : TreeZipper → Key⁺ → Key⁺ → Set where
+  [] : SortedRangeZipper [] ⊥⁺ ⊤⁺
+  ?«» : ∀ {min max zip x a} →
+    SortedRangeZipper zip min max →
+    SortedRange a [ x ] max →
+    SortedRangeZipper (?« x » a ∷ zip) min [ x ]
+  «»? : ∀ {min max zip x a} →
+    SortedRangeZipper zip min max →
+    SortedRange a min [ x ] →
+    SortedRangeZipper (a « x »? ∷ zip) [ x ] max
+
+sorted-lookup-zip-tr : ∀ {min max t y zip} → SortedRange t min max → SortedRangeZipper zip min max → ∃₂ λ (min₁ max₁ : Key⁺) → SortedRangeZipper (proj₂ (lookup-zip-tr y t zip)) min₁ max₁ × SortedRange (proj₁ (lookup-zip-tr y t zip)) min₁ max₁
+sorted-lookup-zip-tr {min} {max} {□} prf₁ prf₂ = min , max , prf₂ , prf₁
+sorted-lookup-zip-tr {min} {max} {a « x » b} {y} {zip} (node prf₁ prf₂ prf₃) prfZip with compare y x
+... | (tri≈ _ _ _) = min , max , prfZip , node prf₁ prf₂ prf₃
+... | (tri< _ _ _) = sorted-lookup-zip-tr prf₂ (?«» prfZip prf₃)
+... | (tri> _ _ _) = sorted-lookup-zip-tr prf₃ («»? prfZip prf₂)
+
+splay : Tree → TreeZipper → Tree
+splay a [] = a
+splay □ (?« x » a ∷ zip) = splay (□ « x » a) zip
+splay □ (a « x »? ∷ zip) = splay (a « x » □) zip
+--zig
+splay (a « x » b) (?« y » c ∷ []) = a « x » (b « y » c)
+splay (b « x » c) (a « y »? ∷ []) = (a « y » b) « x » c
+--zig-zig
+splay (a « x » b) (?« y » c ∷ ?« z » d ∷ zip) = splay (a « x » (b « y » (c « z » d))) zip
+splay (c « x » d) (b « y »? ∷ a « z »? ∷ zip) = splay (((a « z » b) « y » c) « x » d) zip
+--zig-zag
+splay (b « x » c) (a « y »? ∷ ?« z » d ∷ zip) = splay ((a « y » b) « x » (c « z » d)) zip
+splay (b « x » c) (?« y » d ∷ a « z »? ∷ zip) = splay ((a « z » b) « x » (c « y » d)) zip
+
+lemma-range : ∀ {min max t} → SortedRange t min max → min <⁺ max
+lemma-range (leaf prf) = prf
+lemma-range (node (prf₁ , prf₂) _ _) = trans-<⁺ prf₁ prf₂
+
+sorted-splay : ∀ {min max t zip} → SortedRange t min max → SortedRangeZipper zip min max → Sorted (splay t zip)
+sorted-splay {zip = []} prf₁ _ = lemma-extend-range ⊥⁺-min ⊤⁺-max prf₁
+sorted-splay {t = □} {zip = ?« x » a ∷ zip} prf₁ (?«» prf₂ prf₃) = sorted-splay (node (lemma-range prf₁ , lemma-range prf₃) prf₁ prf₃) prf₂
+sorted-splay {t = □} {zip = a « x »? ∷ zip} prf₁ («»? prf₂ prf₃) = sorted-splay (node (lemma-range prf₃ , lemma-range prf₁) prf₃ prf₁) prf₂
+--zig
+sorted-splay {t = a « x » b} {zip = ?« y » c ∷ []} (node p₀ p₁ p₂) (?«» prf₂ prf₃) = sorted-splay (node (proj₁ p₀ , trans-<⁺ (proj₂ p₀) (lemma-range prf₃)) p₁ (node (proj₂ p₀ , lemma-range prf₃) p₂ prf₃)) prf₂
+sorted-splay {t = b « x » c} {zip = a « y »? ∷ []} (node p₀ p₁ p₂) («»? prf₂ prf₃) = sorted-splay (node (trans-<⁺ (lemma-range prf₃) (proj₁ p₀) , proj₂ p₀) (node (lemma-range prf₃ , proj₁ p₀) prf₃ p₁) p₂) prf₂
+--zig-zig
+sorted-splay {t = a « x » b} {zip = ?« y » c ∷ ?« z » d ∷ zip} (node p₀ p₁ p₂) (?«» (?«» prf₂ prf₃) prf₄) = sorted-splay (node (proj₁ p₀ , trans-<⁺ (proj₂ p₀) (trans-<⁺ (lemma-range prf₄) (lemma-range prf₃))) p₁ (node ((proj₂ p₀) , (trans-<⁺ (lemma-range prf₄) (lemma-range prf₃))) p₂ (node (lemma-range prf₄ , lemma-range prf₃) prf₄ prf₃))) prf₂
+sorted-splay {t = c « x » d} {zip = b « y »? ∷ a « z »? ∷ zip} (node p₀ p₁ p₂) («»? («»? prf₂ prf₃) prf₄) = sorted-splay (node ((trans-<⁺ (lemma-range prf₃) (trans-<⁺ (lemma-range prf₄) (proj₁ p₀))) , (proj₂ p₀)) (node ((trans-<⁺ (lemma-range prf₃) (lemma-range prf₄)) , (proj₁ p₀)) (node ((lemma-range prf₃) , (lemma-range prf₄)) prf₃ prf₄) p₁) p₂) prf₂
+--zig-zag
+sorted-splay {t = b « x » c} {zip = a « y »? ∷ ?« z » d ∷ zip} (node p₀ p₁ p₂) («»? (?«» prf₂ prf₃) prf₄) = sorted-splay (node ((trans-<⁺ (lemma-range prf₄) (proj₁ p₀)) , (trans-<⁺ (proj₂ p₀) (lemma-range prf₃))) (node ((lemma-range prf₄) , (proj₁ p₀)) prf₄ p₁) (node (lemma-range p₂ , lemma-range prf₃) p₂ prf₃)) prf₂
+sorted-splay {t = b « x » c} {zip = ?« y » d ∷ a « z »? ∷ zip} (node p₀ p₁ p₂) (?«» («»? prf₂ prf₃) prf₄) = sorted-splay (node ((trans-<⁺ (lemma-range prf₃) (proj₁ p₀)) , (trans-<⁺ (proj₂ p₀) (lemma-range prf₄))) (node (lemma-range prf₃ , proj₁ p₀) prf₃ p₁) (node (lemma-range p₂ , lemma-range prf₄) p₂ prf₄)) prf₂
+
