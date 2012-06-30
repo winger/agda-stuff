@@ -1,6 +1,7 @@
 open import Relation.Binary
 open import Relation.Nullary
-open import Relation.Binary.PropositionalEquality as P using (_≡_; _≢_; [_]; inspect; refl)
+open import Relation.Binary.PropositionalEquality as P using (_≡_; _≢_; inspect; refl)
+open import Function.Equivalence as Eq using (_⇔_)
 import Level
 
 module Splay
@@ -185,12 +186,16 @@ data SortedRangeZipper : TreeZipper → Key⁺ → Key⁺ → Set where
     SortedRange a min [ x ] →
     SortedRangeZipper (a « x »? ∷ zip) [ x ] max
 
-sorted-lookup-zip-tr : ∀ {min max t y zip} → SortedRange t min max → SortedRangeZipper zip min max → ∃₂ λ (min₁ max₁ : Key⁺) → SortedRangeZipper (proj₂ (lookup-zip-tr y t zip)) min₁ max₁ × SortedRange (proj₁ (lookup-zip-tr y t zip)) min₁ max₁
-sorted-lookup-zip-tr {min} {max} {□} prf₁ prf₂ = min , max , prf₂ , prf₁
-sorted-lookup-zip-tr {min} {max} {a « x » b} {y} {zip} (node prf₁ prf₂ prf₃) prfZip with compare⁺ y [ x ]
-... | (tri≈ _ _ _) = min , max , prfZip , node prf₁ prf₂ prf₃
-... | (tri< _ _ _) = sorted-lookup-zip-tr prf₂ (?«» prfZip prf₃)
-... | (tri> _ _ _) = sorted-lookup-zip-tr prf₃ («»? prfZip prf₂)
+lemma-range : ∀ {min max t} → SortedRange t min max → min <⁺ max
+lemma-range (leaf prf) = prf
+lemma-range (node (prf₁ , prf₂) _ _) = trans-<⁺ prf₁ prf₂
+
+sorted-lookup-zip-tr : ∀ {min max t y zip} → SortedRange t min max → SortedRangeZipper zip min max → min < y < max → ∃₂ λ (min₁ max₁ : Key⁺) → SortedRangeZipper (proj₂ (lookup-zip-tr [ y ] t zip)) min₁ max₁ × SortedRange (proj₁ (lookup-zip-tr [ y ] t zip)) min₁ max₁ × min₁ < y < max₁
+sorted-lookup-zip-tr {min} {max} {□} prf₁ prf₂ prf₃ = min , max , prf₂ , prf₁ , prf₃
+sorted-lookup-zip-tr {min} {max} {a « x » b} {y} {zip} (node prf₁ prf₂ prf₃) prfZip prfSeg with compare⁺ [ y ] [ x ]
+... | (tri≈ _ _ _) = min , max , prfZip , node prf₁ prf₂ prf₃ , prfSeg
+... | (tri< prf< _ _) = sorted-lookup-zip-tr prf₂ (?«» prfZip prf₃) (proj₁ prfSeg , prf<)
+... | (tri> _ _ prf>) = sorted-lookup-zip-tr prf₃ («»? prfZip prf₂) (prf> , proj₂ prfSeg)
 
 splay : Tree → TreeZipper → Tree
 splay a [] = a
@@ -205,10 +210,6 @@ splay (c « x » d) (b « y »? ∷ a « z »? ∷ zip) = splay (((a « z » b) 
 --zig-zag
 splay (b « x » c) (a « y »? ∷ ?« z » d ∷ zip) = splay ((a « y » b) « x » (c « z » d)) zip
 splay (b « x » c) (?« y » d ∷ a « z »? ∷ zip) = splay ((a « z » b) « x » (c « y » d)) zip
-
-lemma-range : ∀ {min max t} → SortedRange t min max → min <⁺ max
-lemma-range (leaf prf) = prf
-lemma-range (node (prf₁ , prf₂) _ _) = trans-<⁺ prf₁ prf₂
 
 sorted-splay : ∀ {min max t zip} → SortedRange t min max → SortedRangeZipper zip min max → Sorted (splay t zip)
 sorted-splay {zip = []} prf₁ _ = lemma-extend-range ⊥⁺-min ⊤⁺-max prf₁
@@ -234,7 +235,7 @@ delete x a with lookup-zip [ x ] a
 ... | (□ , zip) = splay □ zip
 ... | (b « y » c , zip) with (lookup-zip ⊤⁺) b | inspect (λ x → proj₁ (lookup-zip ⊤⁺ x)) b
 ... | (□ , zip₁) | _ = splay (splay c zip₁) zip
-... | (_ « _ » _ , _) | [ eq ] = ⊥-elim (lemma-lookup-⊤⁺ b eq)
+... | (_ « _ » _ , _) | (P.[_] eq) = ⊥-elim (lemma-lookup-⊤⁺ b eq)
   where lemma-lookup-⊤⁺ : ∀ {zip b c x} (a : Tree) → proj₁ (lookup-zip-tr ⊤⁺ a zip) ≢ (b « x » c)
         lemma-lookup-⊤⁺ □ ()
         lemma-lookup-⊤⁺ (d « y » e) prf with compare⁺ ⊤⁺ [ y ]
@@ -281,30 +282,68 @@ lemma-lookup-zip-tr {b « z » c} {y = y} (right prf) with compare⁺ y [ z ]
 ... | (tri< _ _ _) = inj₂ (lemma-lookup-zip-tr₁ b (hd-?«» prf))
 ... | (tri> _ _ _) = lemma-lookup-zip-tr prf
 
-lemma-∈-splay₁ : ∀ {a x zip} → x ∈ a → x ∈ splay a zip
-lemma-∈-splay₁ {a} {x} {[]} prf = prf
-lemma-∈-splay₁ {□} ()
+lemma-∈-splay₁ : ∀ {a x} → (zip : TreeZipper) → x ∈ a → x ∈ splay a zip
+lemma-∈-splay₁ {a} [] prf = prf
+lemma-∈-splay₁ {□} _ ()
 --zig
-lemma-∈-splay₁ {a « x » b} {.x} {?« y » c ∷ []} root = root
-lemma-∈-splay₁ {a « x » b} {z} {?« y » c ∷ []} (left prf) = left prf
-lemma-∈-splay₁ {a « x » b} {z} {?« y » c ∷ []} (right prf) = right (left prf)
-lemma-∈-splay₁ {a « x » b} {.x} {c « y »? ∷ []} root = root
-lemma-∈-splay₁ {a « x » b} {z} {c « y »? ∷ []} (left prf) = left (right prf)
-lemma-∈-splay₁ {a « x » b} {z} {c « y »? ∷ []} (right prf) = right prf
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ []) root = root
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ []) (left prf) = left prf
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ []) (right prf) = right (left prf)
+lemma-∈-splay₁ {a « x » b} (c « y »? ∷ []) root = root
+lemma-∈-splay₁ {a « x » b} (c « y »? ∷ []) (left prf) = left (right prf)
+lemma-∈-splay₁ {a « x » b} (c « y »? ∷ []) (right prf) = right prf
 --zig-zig
-lemma-∈-splay₁ {a « x » b} {._} {?« y » c ∷ ?« z » d ∷ zip} root = lemma-∈-splay₁ {zip = zip} root
-lemma-∈-splay₁ {a « x » b} {_} {?« y » c ∷ ?« z » d ∷ zip} (left prf) = lemma-∈-splay₁ {zip = zip} (left prf)
-lemma-∈-splay₁ {a « x » b} {_} {?« y » c ∷ ?« z » d ∷ zip} (right prf) = lemma-∈-splay₁ {zip = zip} (right (left prf))
-lemma-∈-splay₁ {c « x » d} {._} {b « y »? ∷ a « z »? ∷ zip} root = lemma-∈-splay₁ {zip = zip} root
-lemma-∈-splay₁ {c « x » d} {_} {b « y »? ∷ a « z »? ∷ zip} (left prf) = lemma-∈-splay₁ {zip = zip} (left (right prf))
-lemma-∈-splay₁ {c « x » d} {_} {b « y »? ∷ a « z »? ∷ zip} (right prf) = lemma-∈-splay₁ {zip = zip} (right prf)
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) root = lemma-∈-splay₁ zip root
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (left prf) = lemma-∈-splay₁ zip (left prf)
+lemma-∈-splay₁ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (right prf) = lemma-∈-splay₁ zip (right (left prf))
+lemma-∈-splay₁ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) root = lemma-∈-splay₁ zip root
+lemma-∈-splay₁ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (left prf) = lemma-∈-splay₁ zip (left (right prf))
+lemma-∈-splay₁ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (right prf) = lemma-∈-splay₁ zip (right prf)
 --zig-zag
-lemma-∈-splay₁ {b « x » c} {._} {a « y »? ∷ ?« z » d ∷ zip} root = lemma-∈-splay₁ {zip = zip} root
-lemma-∈-splay₁ {b « x » c} {_} {a « y »? ∷ ?« z » d ∷ zip} (left prf) = lemma-∈-splay₁ {zip = zip} (left (right prf))
-lemma-∈-splay₁ {b « x » c} {_} {a « y »? ∷ ?« z » d ∷ zip} (right prf) = lemma-∈-splay₁ {zip = zip} (right (left prf))
-lemma-∈-splay₁ {b « x » c} {._} {?« y » d ∷ a « z »? ∷ zip} root = lemma-∈-splay₁ {zip = zip} root
-lemma-∈-splay₁ {b « x » c} {_} {?« y » d ∷ a « z »? ∷ zip} (left prf) = lemma-∈-splay₁ {zip = zip} (left (right prf))
-lemma-∈-splay₁ {b « x » c} {_} {?« y » d ∷ a « z »? ∷ zip} (right prf) = lemma-∈-splay₁ {zip = zip} (right (left prf))
+lemma-∈-splay₁ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) root = lemma-∈-splay₁ zip root
+lemma-∈-splay₁ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (left prf) = lemma-∈-splay₁ zip (left (right prf))
+lemma-∈-splay₁ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (right prf) = lemma-∈-splay₁ zip (right (left prf))
+lemma-∈-splay₁ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) root = lemma-∈-splay₁ zip root
+lemma-∈-splay₁ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (left prf) = lemma-∈-splay₁ zip (left (right prf))
+lemma-∈-splay₁ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (right prf) = lemma-∈-splay₁ zip (right (left prf))
+
+lemma-∈-splay₂ : ∀ {a x} → (zip : TreeZipper) → x ∈zip zip → x ∈ splay a zip
+lemma-∈-splay₂ [] ()
+lemma-∈-splay₂ {□} (?« x » a ∷ zip) hd-?«»-≡ = lemma-∈-splay₁ zip root
+lemma-∈-splay₂ {□} (?« x » a ∷ zip) (hd-?«» prf) = lemma-∈-splay₁ zip (right prf)
+lemma-∈-splay₂ {□} (?« x » a ∷ zip) (tl prf) = lemma-∈-splay₂ zip prf
+lemma-∈-splay₂ {□} (a « x »? ∷ zip) hd-«»?-≡ = lemma-∈-splay₁ zip root
+lemma-∈-splay₂ {□} (a « x »? ∷ zip) (hd-«»? prf) = lemma-∈-splay₁ zip (left prf)
+lemma-∈-splay₂ {□} (a « x »? ∷ zip) (tl prf) = lemma-∈-splay₂ zip prf
+--zig
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ []) hd-?«»-≡ = right root
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ []) (hd-?«» prf) = right (right prf)
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ []) (tl ())
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ []) hd-«»?-≡ = left root
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ []) (hd-«»? prf) = left (left prf)
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ []) (tl ())
+--zig-zig
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) hd-?«»-≡ = lemma-∈-splay₁ zip (right root)
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (hd-?«» prf) = lemma-∈-splay₁ zip (right (right (left prf)))
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (tl hd-?«»-≡) = lemma-∈-splay₁ zip (right (right root))
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (tl (hd-?«» prf)) = lemma-∈-splay₁ zip (right (right (right prf)))
+lemma-∈-splay₂ {a « x » b} (?« y » c ∷ ?« z » d ∷ zip) (tl (tl prf)) = lemma-∈-splay₂ zip prf
+lemma-∈-splay₂ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) hd-«»?-≡ = lemma-∈-splay₁ zip (left root)
+lemma-∈-splay₂ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (hd-«»? prf) = lemma-∈-splay₁ zip (left (left (right prf)))
+lemma-∈-splay₂ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (tl hd-«»?-≡) = lemma-∈-splay₁ zip (left (left root))
+lemma-∈-splay₂ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (tl (hd-«»? prf)) = lemma-∈-splay₁ zip (left (left (left prf)))
+lemma-∈-splay₂ {c « x » d} (b « y »? ∷ a « z »? ∷ zip) (tl (tl prf)) = lemma-∈-splay₂ zip prf
+--zig-zag
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) hd-«»?-≡ = lemma-∈-splay₁ zip (left root)
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (hd-«»? prf) = lemma-∈-splay₁ zip (left (left prf))
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (tl hd-?«»-≡) = lemma-∈-splay₁ zip (right root)
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (tl (hd-?«» prf)) = lemma-∈-splay₁ zip (right (right prf))
+lemma-∈-splay₂ {b « x » c} (a « y »? ∷ ?« z » d ∷ zip) (tl (tl prf)) = lemma-∈-splay₂ zip prf
+lemma-∈-splay₂ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (hd-?«»-≡) = lemma-∈-splay₁ zip (right root)
+lemma-∈-splay₂ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (hd-?«» prf) = lemma-∈-splay₁ zip (right (right prf))
+lemma-∈-splay₂ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (tl hd-«»?-≡) = lemma-∈-splay₁ zip (left root)
+lemma-∈-splay₂ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (tl (hd-«»? prf)) = lemma-∈-splay₁ zip (left (left prf))
+lemma-∈-splay₂ {b « x » c} (?« y » d ∷ a « z »? ∷ zip) (tl (tl prf)) = lemma-∈-splay₂ zip prf
 
 lemma-lookup : ∀ {x y a b c zip} → proj₁ (lookup-zip-tr [ x ] a zip) ≡ (b « y » c) → x ≡ y
 lemma-lookup {a = □} ()
@@ -315,11 +354,25 @@ lemma-lookup {x} {y} {._ « .y » ._} refl | (tri≈ _ prf _) = lemma-x≡y prf
 
 lemma-insert₁ : ∀ {x a} → x ∈ insert x a
 lemma-insert₁ {x} {a} with lookup-zip [ x ] a | inspect (λ t → proj₁ (lookup-zip [ x ] t)) a
-... | (□ , zip) | _ = lemma-∈-splay₁ {zip = zip} root
-... | (b « y » c , zip) | [ eq ] with lemma-lookup {a = a} eq
-... | eq₁ = lemma-∈-splay₁ {zip = zip} (tmp eq₁)
+... | (□ , zip) | _ = lemma-∈-splay₁ zip root
+... | (b « y » c , zip) | (P.[_] eq ) with lemma-lookup {a = a} eq
+... | eq₁ = lemma-∈-splay₁ zip (tmp eq₁)
   where tmp : ∀ {x y a b} → x ≡ y → x ∈ (a « y » b)
         tmp {x} {.x} refl = root
 
 lemma-insert₂ : ∀ {a x y} → y ∈ a → x ∈ insert x a
 lemma-insert₂ = {!!}
+
+theorem-insert₁ : ∀ {x a} → Sorted a → Sorted (insert x a)
+theorem-insert₁ {x} {a} prf with lookup-zip [ x ] a | sorted-lookup-zip-tr {⊥⁺} {⊤⁺} {a} {x} {[]} prf [] (b<x , x<t)
+... | □ , zip | min , max , prf₁ , prf₂ , prf₃ = sorted-splay (node prf₃ (leaf (proj₁ prf₃)) (leaf (proj₂ prf₃))) prf₁
+... | b « z » c , zip | min , max , prf₁ , prf₂ , _ = sorted-splay prf₂ prf₁
+
+theorem-insert₂ : ∀ {x y a} → x ∈ a ⊎ x ≡ y ⇔ x ∈ insert y a
+theorem-insert₂ = {!!}
+
+theorem-delete₁ : ∀ {x a} → Sorted a → Sorted (delete x a)
+theorem-delete₁ = {!!}
+
+theorem-delete₂ : ∀ {x y a} → x ∈ a ⇔ x ∈ delete y a ⊎ x ≡ y
+theorem-delete₂ = {!!}
